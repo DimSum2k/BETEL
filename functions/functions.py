@@ -102,23 +102,17 @@ def newton_solver(G):
     result = prob.solve(solver=cp.SCS)
     return(lambd.value)
 
-
-
 def calculate_posterior(x,y,z,model="M1"):
-    '''Why do we have different models?'''
     
     alpha,beta,v = x[0],x[1],x[2]
     e_theta = lambda alpha, beta: y - alpha - beta*z
     
     ### different G_func for different model ###
-    if model == "M1":
+    if model == "M1": 
         G_func = lambda alpha, beta, v: np.vstack((e_theta(alpha,beta), e_theta(alpha,beta)*z, e_theta(alpha,beta)**3 - v))
     if model == "M2":
-        G_func = lambda alpha, beta, v: np.vstack((e_theta(alpha,beta), e_theta(alpha,beta)**3 - v))
-    if model == "M3":
-        G_func = lambda alpha, beta, v: np.vstack((e_theta(alpha,beta), e_theta(alpha,beta)*z**2, e_theta(alpha,beta)**3 - v))
-    
-    
+        G_func = lambda alpha, beta, v: np.vstack((e_theta(alpha,beta), e_theta(alpha,beta)*z, e_theta(alpha,beta)**3 ))
+            
     G=G_func(alpha,beta,v)
     
     lambd_opt=newton_solver(G)
@@ -206,3 +200,97 @@ def metropolis(t, burn, y,z, mean, cov):
             print("iter: ", i+1, "coeffs: ",alpha_0,beta_0,v_0)
 
     return res
+
+
+
+
+def model_hessian_model(model,y,z):
+    t = 10
+    #t=4
+    alpha_s = np.linspace(-1,1,t)
+    beta_s = np.linspace(0,2,t)
+    v_s = np.linspace(-1,1,t)
+    res = np.zeros((t,t,t))
+    c=0
+
+    for ix,i in enumerate(alpha_s):
+        for jx,j in enumerate(beta_s):
+            for lx,l in enumerate(v_s):
+                x=np.array([i,j,l])
+                try:
+                  v,_,_=calculate_posterior(x,y,z,model)
+                except:
+                  continue
+                res[ix,jx,lx] = v
+                c+=1
+                if c%50==0:
+                    print(c)
+    
+    res[res==0]=-np.infty
+    a,b,c = np.unravel_index(np.argmax(res, axis=None), res.shape)
+    mean=np.array([alpha_s[a], beta_s[b],v_s[c]])
+    cov = -inv(approx_hessian(mean[0],mean[1],mean[2],y,z,h1=0.01,h2=0.01,model=model)) 
+    
+    return(mean,cov)
+
+def q(phi,mean,cov):
+    return(multivariate_t_distribution(phi, mu=mean, Sigma=cov, df=3))
+
+
+def log_coeff(phi,phi_tild,model,y,z,mean,cov):
+    return(calculate_posterior(phi_tild,y,z,model)[0]-calculate_posterior(phi,y,z,model)[0]+np.log(q(phi,mean,cov))-np.log(q(phi_tild,mean,cov)))
+
+
+
+
+
+def marginal(model_test,y,z):
+
+#il ne manque plus que le troisieme terme de log mx 
+  print(model_test)
+  phi_tild,cov= model_hessian_model(model_test,y,z) #je colle aux notations du papier mais je prends la moyenne de log posterior pour phi_tild_l (dépend du modele)
+  log_posterior, log_prior,log_px = calculate_posterior(phi_tild,y,z,model=model_test)
+   
+  #step2
+  #numérateur il faut générer selon hastings et moyenniser
+  nburn=1000
+  niter1=1000
+  total1=0
+  alpha_0,beta_0,v_0=0.5,0.5,0.5 
+  print("Espérance 1")
+  for i in range(niter1+nburn):
+      if(i%100==0 and i<999):
+        print(i)
+      try:
+      #on prend pour moyenne de la loi de proposition phi_tild qui est le mode de la fonction BETEL
+        alpha_0,beta_0,v_0=iteration(alpha_0,beta_0,v_0,y,z,phi_tild,cov,model=model_test)
+      except:
+        continue
+      if i>=999:#on grille les premières générations
+          if i%100==0:
+            print(i)
+          gen= np.array([alpha_0,beta_0,v_0])
+          total1+=np.exp(log_coeff(gen,phi_tild,model_test,y,z,phi_tild,cov))*q(phi_tild,phi_tild,cov)
+
+  E1=total1/niter1
+
+  print(E1)
+
+  print("Espérance 2")
+  #dénominateur
+  #génération plusieurs fois suivant q
+
+  niter2=1000
+  total2=0
+  for i in range(niter2):
+      if i%100==0:
+        print(i)
+      gen=multivariate_t_rvs(phi_tild, cov, df=3, n=1)[0]
+      total2+=np.exp(log_coeff(phi_tild,gen,model_test,y,z,phi_tild,cov))
+  E2=total2/niter2  
+  print(E2)  
+  #Et Finalement
+  log_mx= log_prior+log_px-np.log(E1/E2)
+  print(log_mx)
+  return(log_mx)
+
