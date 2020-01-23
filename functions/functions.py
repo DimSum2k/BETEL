@@ -4,9 +4,6 @@ import scipy.stats as stat
 import cvxpy as cp
 from scipy.stats import bernoulli
 
-
-
-
 ########### Multivariate T-distribution helper ###############################
 
 def multivariate_t_distribution(x, mu, Sigma, df=np.inf):
@@ -19,8 +16,6 @@ def multivariate_t_distribution(x, mu, Sigma, df=np.inf):
         mu = mean (d dimensional numpy array)
         Sigma = scale matrix (dxd numpy array)
         df = degrees of freedom
-
-    Edited from: http://stackoverflow.com/a/29804411/3521179
     '''
 
     x = np.atleast_2d(x) # requires x as 2d
